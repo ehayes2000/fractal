@@ -1,69 +1,169 @@
-use wasm_bindgen::Clamped;
-use web_sys::{CanvasRenderingContext2d, ImageData};
+use wasm_bindgen::prelude::*;
+use web_sys::{HtmlCanvasElement, WebGl2RenderingContext, WebGlProgram, WebGlShader};
 mod utils;
 
-const MAX_ITERATIONS: u32 = 400;
-const MAX_F: f64 = 4.0;
-// const SCALING_FACTOR: f64 = f64::MAX / 4.0;
+const VERTEX_SHADER: &str = include_str!("vertex.glsl");
+const FRAGMENT_SHADER: &str = include_str!("mandelbrot_fragment.glsl");
+const MAX_ITERATIONS: u32 = 3000;
+const VERTICES: [f32; 18] = [
+    -1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, -1.0, 0.0, -1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0,
+];
 
-use wasm_bindgen::prelude::*;
-
-macro_rules! log {
-    ( $( $t:tt )* ) => {
-        web_sys::console::log_1(&format!( $( $t )* ).into());
-    }
+#[wasm_bindgen]
+pub struct Mandelbrot {
+    program: WebGlProgram,
+    gl: WebGl2RenderingContext,
+    height: u32,
+    width: u32,
 }
 
 #[wasm_bindgen]
-pub fn draw(
-    ctx: &CanvasRenderingContext2d,
-    width: u32,
-    height: u32,
-    xmin: f64,
-    xsize: f64,
-    ymin: f64,
-    ysize: f64,
-    scaling_factor: f64,
-) -> Result<(), JsValue> {
-    let mandeldata = get_mandelbrot(width, height, xmin, xsize, ymin, ysize, scaling_factor);
-    let mandeldata =
-        ImageData::new_with_u8_clamped_array_and_sh(Clamped(&mandeldata), width, height)?;
-    ctx.put_image_data(&mandeldata, 0.0, 0.0)
+impl Mandelbrot {
+    pub fn new(canvas: &HtmlCanvasElement) -> Result<Mandelbrot, JsValue> {
+        let gl = canvas
+            .get_context("webgl2")?
+            .expect("webgl2 support")
+            .dyn_into::<WebGl2RenderingContext>()?;
+
+        let vert_shader =
+            Self::compile_shader(&gl, WebGl2RenderingContext::VERTEX_SHADER, VERTEX_SHADER)?;
+
+        let frag_shader = Self::compile_shader(
+            &gl,
+            WebGl2RenderingContext::FRAGMENT_SHADER,
+            FRAGMENT_SHADER,
+        )?;
+
+        let program = Self::link_program(&gl, &vert_shader, &frag_shader)?;
+        gl.use_program(Some(&program));
+
+        Ok(Mandelbrot {
+            program: program,
+            gl: gl,
+            height: canvas.height(),
+            width: canvas.width(),
+        })
+    }
+
+    pub fn test_draw(&self) -> Result<(), JsValue> {
+        let position_attribute_location = self.gl.get_attrib_location(&self.program, "position");
+        let buffer = self.gl.create_buffer().ok_or("Failed to create buffer")?;
+        self.gl
+            .bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+        unsafe {
+            let positions_array_buf_view = js_sys::Float32Array::view(&VERTICES);
+            self.gl.buffer_data_with_array_buffer_view(
+                WebGl2RenderingContext::ARRAY_BUFFER,
+                &positions_array_buf_view,
+                WebGl2RenderingContext::STATIC_DRAW,
+            );
+        }
+        let vao = self
+            .gl
+            .create_vertex_array()
+            .ok_or("Could not create vertex array object")?;
+        self.gl.bind_vertex_array(Some(&vao));
+
+        self.gl.vertex_attrib_pointer_with_i32(
+            position_attribute_location as u32,
+            3,
+            WebGl2RenderingContext::FLOAT,
+            false,
+            0,
+            0,
+        );
+
+        self.gl
+            .enable_vertex_attrib_array(position_attribute_location as u32);
+
+        self.gl.bind_vertex_array(Some(&vao));
+
+        let vert_count = (VERTICES.len() / 3) as i32;
+        let canvas_size_loc = self
+            .gl
+            .get_uniform_location(&self.program, "canvasSize")
+            .expect("fragment shader canvas size uniform");
+        self.gl.uniform2f(
+            Some(&canvas_size_loc),
+            self.width as f32,
+            self.height as f32,
+        );
+        let view_bounds_loc = self
+            .gl
+            .get_uniform_location(&self.program, "viewportBounds")
+            .expect("fragment shader viewbounds uniform");
+        self.gl.uniform4f(
+            Some(&view_bounds_loc),
+            -0.750222,
+            0.001031,
+            0.031161,
+            0.000591,
+        );
+        let max_iter_loc = self
+            .gl
+            .get_uniform_location(&self.program, "MAX_ITERATIONS")
+            .expect("fragment shader MAX_ITERATIONS");
+        self.gl
+            .uniform1i(Some(&max_iter_loc), MAX_ITERATIONS as i32);
+        Self::draw(&self.gl, vert_count);
+        Ok(())
+    }
 }
 
-fn get_mandelbrot(
-    w: u32,
-    h: u32,
-    xmin: f64,
-    xsize: f64,
-    ymin: f64,
-    ysize: f64,
-    scaling_factor: f64,
-) -> Vec<u8> {
-    let mut div_dist: Vec<u8> = Vec::new();
-    let mut avg_it: u128 = 0;
-    for y in 0..h {
-        for x in 0..w {
-            let x0: f64 = (x as f64 / w as f64) * xsize + xmin;
-            let y0: f64 = (y as f64 / h as f64) * ysize + ymin;
-            let mut x: f64 = 0.0;
-            let mut y: f64 = 0.0;
-            let mut iterations: u32 = 0;
-            while x * x + y * y <= scaling_factor * scaling_factor * 4.0
-                && iterations < MAX_ITERATIONS
-            {
-                let temp = (x * x) / scaling_factor - (y * y) / scaling_factor + x0;
-                y = 2.0 * (x * y) / scaling_factor + y0;
-                x = temp;
-                iterations += 1;
-            }
-            avg_it += iterations as u128;
-            div_dist.push((iterations / 4) as u8); // r
-            div_dist.push((iterations / 2) as u8); // g
-            div_dist.push(iterations as u8); // b
-            div_dist.push(255); // a
+impl Mandelbrot {
+    fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
+        context.clear_color(0.0, 0.0, 0.0, 1.0);
+        context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
+        context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);
+    }
+
+    fn compile_shader(
+        context: &WebGl2RenderingContext,
+        shader_type: u32,
+        source: &str,
+    ) -> Result<WebGlShader, String> {
+        let shader = context
+            .create_shader(shader_type)
+            .ok_or_else(|| String::from("Could not create shader object"))?;
+        context.shader_source(&shader, source);
+        context.compile_shader(&shader);
+
+        if context
+            .get_shader_parameter(&shader, WebGl2RenderingContext::COMPILE_STATUS)
+            .as_bool()
+            .unwrap_or(false)
+        {
+            Ok(shader)
+        } else {
+            Err(context
+                .get_shader_info_log(&shader)
+                .unwrap_or_else(|| String::from("Unknown error creating shader")))
         }
     }
-    log!("average iterations: {}", avg_it / (h as u128 * w as u128));
-    div_dist
+
+    fn link_program(
+        context: &WebGl2RenderingContext,
+        vert_shader: &WebGlShader,
+        frag_shader: &WebGlShader,
+    ) -> Result<WebGlProgram, String> {
+        let program = context
+            .create_program()
+            .ok_or_else(|| String::from("Unable to create program"))?;
+
+        context.attach_shader(&program, vert_shader);
+        context.attach_shader(&program, frag_shader);
+        context.link_program(&program);
+
+        if context
+            .get_program_parameter(&program, WebGl2RenderingContext::LINK_STATUS)
+            .as_bool()
+            .unwrap_or(false)
+        {
+            Ok(program)
+        } else {
+            Err(context
+                .get_program_info_log(&program)
+                .unwrap_or_else(|| String::from("Unknown error creating program object")))
+        }
+    }
 }

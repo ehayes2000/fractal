@@ -18,9 +18,11 @@ wasm-bindgen = "0.2.84"
 # all the `std::fmt` and `std::panicking` infrastructure, so isn't great for
 # code size when deploying.
 console_error_panic_hook = { version = "0.1.7", optional = true }
+js-sys = "0.3.69"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
+
 
 [profile.release]
 # Tell `rustc` to optimize for small code size.
@@ -31,5 +33,15 @@ version = "0.3"
 features = [
   "console",
   "CanvasRenderingContext2d", 
-  "ImageData"
+  "ImageData",
+  'Document',
+  'Element',
+  'HtmlCanvasElement',
+  'WebGlBuffer',
+  'WebGlVertexArrayObject',
+  'WebGl2RenderingContext',
+  'WebGlUniformLocation',
+  'WebGlProgram',
+  'WebGlShader',
+  'Window',
 ]
