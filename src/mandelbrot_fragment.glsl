@@ -1,6 +1,6 @@
 #version 300 es
 
-precision lowp float;
+precision highp float;
 uniform vec2 canvasSize;
 uniform vec4 viewportBounds;
 uniform int MAX_ITERATIONS;
