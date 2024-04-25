@@ -4,7 +4,7 @@ mod utils;
 
 const VERTEX_SHADER: &str = include_str!("vertex.glsl");
 const FRAGMENT_SHADER: &str = include_str!("mandelbrot_fragment.glsl");
-const MAX_ITERATIONS: u32 = 3000;
+const MAX_ITERATIONS: u32 = 600;
 const VERTICES: [f32; 18] = [
     -1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, -1.0, 0.0, -1.0, 1.0, 0.0, -1.0, -1.0, 0.0, 1.0, -1.0, 0.0,
 ];
@@ -15,13 +15,14 @@ pub struct Mandelbrot {
     gl: WebGl2RenderingContext,
     height: u32,
     width: u32,
+    max_iterations: u32,
 }
 
 #[wasm_bindgen]
 impl Mandelbrot {
     pub fn new(canvas: &HtmlCanvasElement) -> Result<Mandelbrot, JsValue> {
         let gl = canvas
-            .get_context("webgl2")?
+            .get_context_with_context_options("webgl2", &JsValue::from_str("{antialias:true}"))?
             .expect("webgl2 support")
             .dyn_into::<WebGl2RenderingContext>()?;
 
@@ -42,9 +43,66 @@ impl Mandelbrot {
             gl: gl,
             height: canvas.height(),
             width: canvas.width(),
+            max_iterations: 400,
         })
     }
+    pub fn draw(&self, x: f32, xs: f32, y: f32, ys: f32) -> Result<(), JsValue> {
+        let position_attribute_location = self.gl.get_attrib_location(&self.program, "position");
+        let buffer = self.gl.create_buffer().ok_or("Failed to create buffer")?;
+        self.gl
+            .bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
+        unsafe {
+            let positions_array_buf_view = js_sys::Float32Array::view(&VERTICES);
+            self.gl.buffer_data_with_array_buffer_view(
+                WebGl2RenderingContext::ARRAY_BUFFER,
+                &positions_array_buf_view,
+                WebGl2RenderingContext::STATIC_DRAW,
+            );
+        }
+        let vao = self
+            .gl
+            .create_vertex_array()
+            .ok_or("Could not create vertex array object")?;
+        self.gl.bind_vertex_array(Some(&vao));
 
+        self.gl.vertex_attrib_pointer_with_i32(
+            position_attribute_location as u32,
+            3,
+            WebGl2RenderingContext::FLOAT,
+            false,
+            0,
+            0,
+        );
+
+        self.gl
+            .enable_vertex_attrib_array(position_attribute_location as u32);
+
+        self.gl.bind_vertex_array(Some(&vao));
+
+        let vert_count = (VERTICES.len() / 3) as i32;
+        let canvas_size_loc = self
+            .gl
+            .get_uniform_location(&self.program, "canvasSize")
+            .expect("fragment shader canvas size uniform");
+        self.gl.uniform2f(
+            Some(&canvas_size_loc),
+            self.width as f32,
+            self.height as f32,
+        );
+        let view_bounds_loc = self
+            .gl
+            .get_uniform_location(&self.program, "viewportBounds")
+            .expect("fragment shader viewbounds uniform");
+        self.gl.uniform4f(Some(&view_bounds_loc), x, xs, y, ys);
+        let max_iter_loc = self
+            .gl
+            .get_uniform_location(&self.program, "MAX_ITERATIONS")
+            .expect("fragment shader MAX_ITERATIONS");
+        self.gl
+            .uniform1i(Some(&max_iter_loc), MAX_ITERATIONS as i32);
+        Self::render(&self.gl, vert_count);
+        Ok(())
+    }
     pub fn test_draw(&self) -> Result<(), JsValue> {
         let position_attribute_location = self.gl.get_attrib_location(&self.program, "position");
         let buffer = self.gl.create_buffer().ok_or("Failed to create buffer")?;
@@ -105,13 +163,18 @@ impl Mandelbrot {
             .expect("fragment shader MAX_ITERATIONS");
         self.gl
             .uniform1i(Some(&max_iter_loc), MAX_ITERATIONS as i32);
-        Self::draw(&self.gl, vert_count);
+        // let scaling_factor = self
+        //     .gl
+        //     .get_uniform_location(&self.program, "scaling_factor")
+        //     .expect("scaling factor");
+        // self.gl.unirom1i(Some(&scaling_factor), 1000 as i32);
+        Self::render(&self.gl, vert_count);
         Ok(())
     }
 }
 
 impl Mandelbrot {
-    fn draw(context: &WebGl2RenderingContext, vert_count: i32) {
+    fn render(context: &WebGl2RenderingContext, vert_count: i32) {
         context.clear_color(0.0, 0.0, 0.0, 1.0);
         context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
         context.draw_arrays(WebGl2RenderingContext::TRIANGLES, 0, vert_count);

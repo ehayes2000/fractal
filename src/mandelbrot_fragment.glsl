@@ -1,11 +1,11 @@
 #version 300 es
 
-precision mediump float;
+precision lowp float;
 uniform vec2 canvasSize;
 uniform vec4 viewportBounds;
 uniform int MAX_ITERATIONS;
+uniform float scaling_factor;
 out vec4 outColor;
-
 void main(){
     vec2 c=(gl_FragCoord.xy/canvasSize)*viewportBounds.yw+viewportBounds.xz;
     float x=0.;
@@ -18,6 +18,5 @@ void main(){
         x=tx;
         i++;
     }
-    float ipercent=float(i)/float(MAX_ITERATIONS);
-    outColor=vec4(ipercent/4.,ipercent/2.,ipercent,1.);
+    outColor=vec4(float(i%255)/float(255),float(i*2%255)/float(255),float(i*3%255)/float(255),1.);
 }
